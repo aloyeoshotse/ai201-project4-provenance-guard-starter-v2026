@@ -188,12 +188,26 @@ plain sentences or a formal template.
 ```bash
 $ curl -X POST http://127.0.0.1:5000/submit \
   -H "Content-Type: application/json" \
-  -d '{"text": "...", "creator_id": "..."}'
+  -d '{"text": "I walked to the store this morning and bought some bread for my mother.", "creator_id": "aloye"}'
 ```
 
 ```json
-
+{
+  "confidence": 0.5,
+  "content_id": "2c32625a-3329-4f2d-b07e-7ff58c35e9c6",
+  "guess": "unsure",
+  "label": "PLACEHOLDER",
+  "model_score": 0.7162,
+  "style_score": 0.5,
+  "you_sent": {
+    "creator_id": "aloye",
+    "text": "I walked to the store this morning and bought some bread for my mother."
+  }
+}
 ```
+
+(Milestone 3 state: `model_score` is real; `confidence`, `style_score`, `guess`
+and `label` are still placeholders until Milestones 4 and 5.)
 
 **An appeal**
 
@@ -214,7 +228,33 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
 ```
 
 ```json
-
+{
+  "count": 2,
+  "entries": [
+    {
+      "combined_score": 0.5,
+      "content_id": "95b050a8-2a71-464b-83c7-a38f9d95fbcc",
+      "creator_id": "aloye",
+      "guess": "unsure",
+      "label": "PLACEHOLDER",
+      "model_score": 0.7162,
+      "status": "decided",
+      "style_score": 0.5,
+      "timestamp": "2026-11-01T18:31:20+00:00"
+    },
+    {
+      "combined_score": 0.5,
+      "content_id": "2c32625a-3329-4f2d-b07e-7ff58c35e9c6",
+      "creator_id": "aloye",
+      "guess": "unsure",
+      "label": "PLACEHOLDER",
+      "model_score": 0.7162,
+      "status": "decided",
+      "style_score": 0.5,
+      "timestamp": "2026-11-02T03:00:10+00:00"
+    }
+  ]
+}
 ```
 
 ---
