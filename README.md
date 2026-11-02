@@ -45,9 +45,11 @@ decision is logged, and a writer who disagrees can appeal. A submission takes
 seven steps from arriving to the label a reader sees:
 
 1. **The route (`POST /submit`, `app.py`).** Receives the JSON
-   `{"text": "...", "creator_id": "..."}`. It checks the input first: missing,
-   empty or enormous text is rejected with an error instead of crashing. It adds
-   a unique `content_id`, which every later step and any appeal hangs off.
+   `{"text": "...", "creator_id": "..."}`. It checks the input first: missing or
+   empty text is rejected with a 400 error instead of crashing. (There is no
+   length cap yet, and very short text still fails inside the model signal;
+   both are known gaps.) It adds a unique `content_id`, which every later step
+   and any appeal hangs off.
 2. **Signal one: the model signal (`detector.model_signal`).** Runs the text
    through a local language model (gpt2) and measures how predictable it is
    (perplexity). It adds `model_score`, from 0 to 1, where higher means more
@@ -325,15 +327,20 @@ $ curl "http://127.0.0.1:5000/log?limit=2"
 
 **Moment 1**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* After I had written the `/submit` route myself, with the
+  signal wired in, I asked Claude whether I needed to change anything else.
+- *What came back:* A review of my own code. It pointed out that `detector`
+  wasn't imported, that `model_signal` ran *before* my empty-text check (so an
+  empty submission would crash with a 500 before my 400 could fire), and that
+  the model ran twice, once for the log and once for the response, which is
+  slow and can give two different numbers. A later check found I had also
+  deleted the `model_score` line while the log call still used it, which
+  raised a `NameError` on every valid request.
+- *What I changed:* I restored `model_score`, moved the model call below the
+  validation check, and used the one variable in both the log and the
+  response. After that a valid request returned a real score and landed in
+  `/log`, and an empty `text` got a clean 400.
 
-**Moment 2**
-
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
 
 <!-- ═══════════════════════ UNIT 8 — THE TEST ═══════════════════════ -->
 
