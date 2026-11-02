@@ -259,12 +259,32 @@ def appeal():
     """
     payload = request.get_json(silent=True) or {}
 
-    # TODO: delete this and build the route.
+    content_id = payload.get("content_id")
+    reasoning = payload.get("reasoning")
+
+    if not isinstance(content_id, str) or not content_id.strip():
+        return jsonify({"error": "invalid_content_id", "message": "content_id is required."}), 400
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return jsonify({"error": "invalid_reasoning", "message": "reasoning is required."}), 400
+
+    entries = audit.entries_for(content_id)
+    if not entries:
+        return jsonify({
+            "error": "unknown_content_id",
+            "message": "We have no submission with that content_id. Check it and try again.",
+        }), 404
+
+    # The appeal goes in the log next to the original decision; the original is
+    # never overwritten. The creator comes from that original entry, so a
+    # writer can't appeal under someone else's name.
+    creator_id = entries[0].get("creator_id")
+    audit.log_appeal(content_id=content_id, creator_id=creator_id, reasoning=reasoning.strip())
+
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /appeal isn't built yet — see the TODO in app.py.",
-        "you_sent": payload,
-    }), 501
+        "content_id": content_id,
+        "status": "under_review",
+        "message": "Thanks. Your appeal has been recorded and a person will review it.",
+    })
 
 
 # ── Already works ─────────────────────────────────────────────────────────────

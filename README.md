@@ -202,16 +202,28 @@ in the combining rule and a style score just under 0.5, which is thin.
 
 | Label | Score range | The exact text a reader sees |
 |---|---|---|
-| high-confidence human |  |  |
-| unsure |  |  |
-| high-confidence AI |  |  |
+| high-confidence human | 0.00 – 0.35 | We think this was probably written by a person. |
+| unsure | 0.35 – 0.65 | We can't tell whether this was written by a person or with the help of AI. Our check isn't always right, especially on plain, simple writing, so please don't take this as a verdict. If you wrote it yourself, you can appeal and a person will look at it. |
+| high-confidence AI | 0.65 – 1.00 | This may have been written with the help of AI. Our check can be wrong. If you wrote it yourself, you can appeal and a person will review it. |
 
 **Why I worded the "unsure" one this way:**
-<!-- It's the hardest of the three. It has to admit uncertainty without
-     sounding like an accusation, because the person reading it may well have
-     written every word themselves. -->
 
+It is the label a real writer is most likely to meet, and they may have written
+every word themselves, so it never says or implies they cheated. It says "we
+can't tell" rather than "this might be AI", names the limit of the check
+("isn't always right, especially on plain, simple writing", which is true and
+is the writer I traced in Milestone 1), and tells them not to take it as a
+verdict. It ends with something they can do: appeal, and a person will look.
+The other two labels carry the same appeal line, because either one could be
+wrong. None of them shows a number, because "0.64" means nothing to a writer.
 
+**Reachability.** I submitted text that produced each label through
+`POST /submit`: a clearly AI-style paragraph scored 0.728 (AI), a messy
+personal paragraph scored 0.225 (human), and a plain paragraph about a hike
+scored 0.640 (unsure). All three are reachable. One caution: the AI label was
+reached only by a paragraph of short, flat sentences, which is also what plain
+human writing looks like. Other AI-style paragraphs I tried scored 0.635 to
+0.640 and were held at "unsure" by the rule that both signals must agree.
 
 ---
 
@@ -227,46 +239,57 @@ in the combining rule and a style score just under 0.5, which is thin.
      two off the response, so leaving them out costs you next unit's
      diagnostics. -->
 
+This is the plain paragraph about a hike. It is the kind of writing my signals
+get wrong, so it is the one I appealed.
+
 ```bash
 $ curl -X POST http://127.0.0.1:5000/submit \
   -H "Content-Type: application/json" \
-  -d '{"text": "I walked to the store this morning and bought some bread for my mother.", "creator_id": "aloye"}'
+  -d '{"text": "Last weekend I went hiking with some friends. The trail was steep at first but the view from the top was worth it. We had lunch by a small lake and then walked back down before it got dark. It was a good day and I would like to go again soon.", "creator_id": "label_unsure"}'
 ```
 
 ```json
 {
-  "confidence": 0.5,
-  "content_id": "2c32625a-3329-4f2d-b07e-7ff58c35e9c6",
+  "confidence": 0.64,
+  "content_id": "c99a6923-a472-4905-8641-2549bc683bc0",
   "guess": "unsure",
-  "label": "PLACEHOLDER",
-  "model_score": 0.7162,
-  "style_score": 0.5,
+  "label": "We can't tell whether this was written by a person or with the help of AI. Our check isn't always right, especially on plain, simple writing, so please don't take this as a verdict. If you wrote it yourself, you can appeal and a person will look at it.",
+  "model_score": 0.8429,
+  "style_score": 0.4544,
   "you_sent": {
-    "creator_id": "aloye",
-    "text": "I walked to the store this morning and bought some bread for my mother."
+    "creator_id": "label_unsure",
+    "text": "Last weekend I went hiking with some friends. The trail was steep at first but the view from the top was worth it. We had lunch by a small lake and then walked back down before it got dark. It was a good day and I would like to go again soon."
   }
 }
 ```
-
-(Milestone 3 state: `model_score` is real; `confidence`, `style_score`, `guess`
-and `label` are still placeholders until Milestones 4 and 5.)
 
 **An appeal**
 
 ```bash
 $ curl -X POST http://127.0.0.1:5000/appeal \
   -H "Content-Type: application/json" \
-  -d '{"content_id": "...", "reasoning": "..."}'
+  -d '{"content_id": "c99a6923-a472-4905-8641-2549bc683bc0", "reasoning": "I wrote this myself about a hike with my friends last weekend. English is my second language, so I keep my sentences short."}'
 ```
 
 ```json
-
+{
+  "content_id": "c99a6923-a472-4905-8641-2549bc683bc0",
+  "message": "Thanks. Your appeal has been recorded and a person will review it.",
+  "status": "under_review"
+}
 ```
+
+An appeal on an unknown `content_id` returns 404, and a missing `reasoning` or
+`content_id` returns 400, so a typo can't look like a success.
 
 **What the log shows afterwards**
 
+The original decision stays as it was and the appeal is appended beside it
+(the log is append-only). The item's current status is the latest entry:
+`under_review`.
+
 ```bash
-$ curl "http://127.0.0.1:5000/log?limit=3"
+$ curl "http://127.0.0.1:5000/log?limit=2"
 ```
 
 ```json
@@ -274,26 +297,23 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
   "count": 2,
   "entries": [
     {
-      "combined_score": 0.5,
-      "content_id": "95b050a8-2a71-464b-83c7-a38f9d95fbcc",
-      "creator_id": "aloye",
+      "combined_score": 0.64,
+      "content_id": "c99a6923-a472-4905-8641-2549bc683bc0",
+      "creator_id": "label_unsure",
       "guess": "unsure",
-      "label": "PLACEHOLDER",
-      "model_score": 0.7162,
+      "label": "We can't tell whether this was written by a person or with the help of AI. Our check isn't always right, especially on plain, simple writing, so please don't take this as a verdict. If you wrote it yourself, you can appeal and a person will look at it.",
+      "model_score": 0.8429,
       "status": "decided",
-      "style_score": 0.5,
-      "timestamp": "2026-11-01T18:31:20+00:00"
+      "style_score": 0.4544,
+      "timestamp": "2026-11-02T03:41:02+00:00"
     },
     {
-      "combined_score": 0.5,
-      "content_id": "2c32625a-3329-4f2d-b07e-7ff58c35e9c6",
-      "creator_id": "aloye",
-      "guess": "unsure",
-      "label": "PLACEHOLDER",
-      "model_score": 0.7162,
-      "status": "decided",
-      "style_score": 0.5,
-      "timestamp": "2026-11-02T03:00:10+00:00"
+      "content_id": "c99a6923-a472-4905-8641-2549bc683bc0",
+      "creator_id": "label_unsure",
+      "event": "appeal",
+      "reasoning": "I wrote this myself about a hike with my friends last weekend. English is my second language, so I keep my sentences short.",
+      "status": "under_review",
+      "timestamp": "2026-11-02T03:41:02+00:00"
     }
   ]
 }
