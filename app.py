@@ -31,6 +31,8 @@ from flask import Flask, jsonify, request
 import audit
 import config
 import detector
+import scoring
+import stylometry
 
 app = Flask(__name__)
 
@@ -210,24 +212,27 @@ def submit():
         return jsonify({"error": "invalid_text", "message": "text is required."}), 400
 
     model_score = detector.model_signal(text)
+    style_score = stylometry.style_signal(text)
+    combined = scoring.combine_signals(model_score, style_score)
+    guess, label = scoring.score_to_label(combined)
 
     audit.log_decision(
         content_id=content_id,
         creator_id=creator_id,
-        guess="unsure",
+        guess=guess,
         model_score=model_score,
-        style_score=0.5,
-        combined_score=0.5,
-        label="PLACEHOLDER"
+        style_score=style_score,
+        combined_score=combined,
+        label=label,
     )
 
     return jsonify({
         "content_id": content_id,
-        "guess": "unsure",
-        "confidence": 0.5,
-        "label": "PLACEHOLDER",
+        "guess": guess,
+        "confidence": combined,
+        "label": label,
         "model_score": model_score,
-        "style_score": 0.5,
+        "style_score": style_score,
         "you_sent": {"text": text, "creator_id": creator_id}
     })
 

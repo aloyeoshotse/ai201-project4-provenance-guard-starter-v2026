@@ -136,9 +136,19 @@ plain sentences or a formal template.
 <!-- Write the rule in words, then give the numbers. What happens when the two
      signals disagree? -->
 
-**The rule:**
+**The rule:** A weighted average of the two signals, with the model signal
+counting more because the style signal is easier to game. On top of that, the
+"AI" label needs both signals to lean AI: if either signal is below 0.5, the
+combined score is held just under the AI threshold, so it can say "unsure" but
+never "AI". A wrong accusation costs a real writer more than a missed detection
+costs the site, so one signal alone can never accuse anyone.
 
-**The numbers:**
+**The numbers:** `combined = 0.6 * model_score + 0.4 * style_score`. If
+`min(model_score, style_score) < 0.5`, `combined` is capped at 0.64 (the AI
+threshold of 0.65 minus 0.01). The weights and the 0.5 bar live in `config.py`
+(`WEIGHT_MODEL_SIGNAL`, `WEIGHT_STYLE_SIGNAL`, `AI_REQUIRES_BOTH_AT`). The style
+signal itself is `0.5 * spread + 0.2 * vocabulary + 0.3 * punctuation`, each
+turned into an AI-likeness from 0 to 1 (see `stylometry.py::style_signal`).
 
 **Where it lives:** `scoring.py::combine_signals`
 
@@ -146,6 +156,38 @@ plain sentences or a formal template.
      somewhere else, say where. -->
 
 **A case where my two signals split, and what my rule does with it:**
+
+Measured on my four calibration inputs plus a plain human paragraph (texts I
+wrote, so treat them as a rough check):
+
+| Input | model | style | combined | guess |
+|---|---|---|---|---|
+| clearly AI | 0.665 | 0.271 | 0.508 | unsure |
+| clearly human | 0.328 | 0.070 | 0.225 | human |
+| plain human | 0.843 | 0.454 | 0.640 | unsure |
+| formal human | 0.463 | 0.000 | 0.278 | human |
+| lightly-edited AI | 0.534 | 0.297 | 0.439 | unsure |
+
+The clearest split is the **clearly-AI paragraph**: the model signal says 0.665
+(AI) but the style signal says 0.271 (human-ish), because its long sentences
+contain plenty of commas, which my punctuation measure reads as human. The rule
+averages them to 0.508 and, since the style signal is below 0.5, would have
+capped the score under the AI threshold anyway: the result is "unsure". I
+accept missing an AI text here rather than accusing on one signal.
+
+**A change I made after seeing a false positive.** My first version of the
+style signal treated a lack of punctuation as evidence of AI. On a plain human
+paragraph (short, even sentences, only full stops) both signals agreed it was
+AI (0.843 and 0.604, combined 0.748, labelled AI), which the combining rule
+could not stop because both signals were above 0.5. I changed the punctuation
+measure so that having few marks is neutral (0.5) rather than AI-like: plain
+writers and second-language writers use few marks too, so absence is not
+evidence. The same paragraph now scores style 0.454 and combined 0.640 and is
+labelled "unsure". I made this change because the measure was unsound, not to
+move one number, but the cost is real: none of my five test texts now reaches
+the "AI" label, so I still need a genuinely AI-written text to show that label
+is reachable (criterion 3). The plain writer is protected only by the guard
+in the combining rule and a style score just under 0.5, which is thin.
 
 
 

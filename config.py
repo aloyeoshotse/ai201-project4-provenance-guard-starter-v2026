@@ -54,8 +54,13 @@ DETECTOR_MAX_TOKENS = 400
 # down BEFORE you code it, and to put the numbers in your README. Whatever you
 # decide, it goes here.
 
-WEIGHT_MODEL_SIGNAL = 0.5
-WEIGHT_STYLE_SIGNAL = 0.5
+WEIGHT_MODEL_SIGNAL = 0.6
+WEIGHT_STYLE_SIGNAL = 0.4
+
+# The combined score can only reach the AI label if BOTH signals are at least
+# this high. Otherwise it is capped just under the AI threshold, so one signal
+# alone can never accuse a writer.
+AI_REQUIRES_BOTH_AT = 0.5
 
 
 # ─── Thresholds (Milestone 5) ────────────────────────────────────────────────
