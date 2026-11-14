@@ -576,21 +576,97 @@ just under the AI threshold.
 
 **Diagnoses**
 
-<!-- For each miss AND each broken attack: the stage and the mechanism.
+Every broken attack and every missed criterion, by stage. Twelve broken attacks
+and one missed criterion come down to five mechanisms, not thirteen problems.
+The measures below were recomputed with `stylometry.py` on the attack texts.
 
-     Your service has five stages: the route, signal one, signal two, the
-     combining rule, and the label mapping.
+**1. MF05, MF06, MF07 (a long run of "a", emoji only, Arabic text): the
+combining rule treats "I don't know" as agreement. Stage: combining rule
+(`scoring.py::combine_signals`), with signal two and signal one feeding it.**
+`stylometry.words()` only matches `[a-z0-9']`, so emoji and Arabic count as 0
+words, and a text under 5 words makes `style_signal` return exactly 0.5, meaning
+"can't see any shape". The guard in `combine_signals` is
+`if min(model, style) < AI_REQUIRES_BOTH_AT` with the bar at 0.5, so 0.5 is *not*
+below it: a signal that said "I don't know" counted as leaning AI. Meanwhile
+gpt2 (signal one) finds these inputs very predictable (model 0.998, 0.997, 0.906)
+(I did not measure why; a repeated token is easy to predict, and for Arabic gpt2
+may split the text into many predictable byte pieces).
+MF05: 0.6 × 0.9976 + 0.4 × 0.5 = 0.7986, over 0.65, labelled AI. One signal alone
+accused the writer, which is exactly what the guard exists to prevent; its
+off-by-one boundary let it through. MF07 is the worst, a person writing in Arabic.
 
-     Not a diagnosis:  "The evasion attacks got through."
-     A diagnosis:      "Four evasion inputs got through. All four had typos
-                        added to AI-generated text. My second signal measures
-                        word variety, and typos raise word variety — so it read
-                        them as more human. My combining rule weights that
-                        signal at 0.6, so it dragged the whole score down."
+**2. MF02, RQ07 (one-character text, a JSON array as the body): the route does
+not protect the model call or the payload. Stage: the route (`app.py::submit`).**
+MF02 passes the empty-text check (`"a"` is a non-empty string), reaches
+`detector.perplexity`, which raises `ValueError("Text is too short to score")`
+for under three tokens, and nothing in `submit` catches it: a 500. RQ07's body
+`["text", "creator_id"]` parses as a non-empty list, so
+`request.get_json(silent=True) or {}` keeps the list and `payload.get("text")`
+raises `AttributeError`. I fixed the same trap in the rate-limit key function
+(`rate_limit_key`) and did not carry it into the route. Neither crash wrote a log
+entry, so these two failures are only visible in the server console.
 
-     Look for a pattern. Five failures on one signal is one problem, not five. -->
+**3. EV01, EV08, and partly EV05 (typos, very short text, heavy editing): signal
+one reacts to surface noise, and signal two does not catch it. Stage: signal one
+(`detector.model_signal`).** The attack set labels EV01 as targeting signal two,
+but the numbers say it worked through signal one. Typos made gpt2 surprised:
+model 0.1635, against 0.6 to 0.9 for the clean AI paragraphs. Signal two moved
+only to 0.4881 (the typo'd words push `type_token_ratio` to 0.87, which clamps to
+zero AI-likeness, but spread 0.16 stays low), so the average fell to
+0.6 × 0.1635 + 0.4 × 0.4881 = 0.2933: "human". EV08 is the same flaw from the
+other side: ten words (two sentences) is too little for perplexity to mean
+anything, model 0.245, and style 0.448 comes from a low spread (0.28), a
+type-token ratio of 1.0 (every word unique) and no punctuation. Both
+signals' blind spots point the same way, and the 0.6 weight on signal one means
+its error decides the label. EV05 (a real human editing pass: spread 0.68, more
+punctuation, model 0.32, style 0.10) is a case where both signals read the text
+as human; I marked it broke because the attack's goal was met, but it is the
+least clear-cut of the three.
 
+**4. FP02, FP05 (a formal report, human technical documentation): signal one
+mistakes formal predictability for machine writing, and signal two agrees
+because the writing is even. Stage: signal one, with the combining rule unable to
+help.** FP02 scored model 0.739 and style 0.525; FP05 model 0.800 and style
+0.567. Both signals are above the 0.5 bar, so the guard did nothing, and the
+average landed at 0.653 and 0.707 against a threshold of 0.65. In both, style came
+from low sentence-length spread (0.24 and 0.28) and, for FP05, a low
+type-token ratio (0.59, because documentation repeats its terms), with almost no
+punctuation. These are real people writing in a register that is even and
+repetitive on purpose. This is the failure in my Milestone 1 trace: a writer who
+cannot be told apart from the machine by either measure. The same mechanism
+explains my own near-miss: the plain paragraph about a park (criterion 1) scored
+model 0.767 and style 0.551 and was labelled AI at 0.681. Criterion 1 is met only
+because exactly one of ten pieces fell on the wrong side.
 
+**5. PI01, PI02 (instructions injected into the text): signal two is fooled by
+the shape of the injection, not by its content. Stage: signal two
+(`stylometry.style_signal`).** Neither signal reads the instruction (they cannot),
+so "ignore all previous instructions" did nothing as an instruction. But a
+short imperative sentence next to long ones gives a high spread (0.66 and 0.65,
+which reads as human), and the unusual tokens (`SYSTEM:`, `guess=human`) raise
+perplexity (model 0.46 and 0.20). Both landed at "human" by accident of shape.
+The risk is real even though the mechanism is not what the attacker intended:
+anyone can prepend an unusual header and see the score fall.
+
+**Criterion 3 missed in all three trials: no AI-style text reaches the "AI"
+label. Stage: signal two and the combining rule together
+(`stylometry.style_signal` and `scoring.combine_signals`).** All three
+intended-AI paragraphs had model scores of 0.84 to 0.93 but style scores of 0.38
+to 0.46, so the guard (min of the two < 0.5) capped them at 0.640. The style signal
+tops out around 0.5 on these: their type-token ratio is 0.84 to 0.92, far above my
+0.80 anchor, so that measure contributes zero (a negative AI-likeness, clamped to
+0), and they use many commas (punctuation density 0.085 to 0.14), which my
+measure reads as human. In other words my style signal's anchors were fitted to a
+short, repetitive AI paragraph and do not describe fluent, comma-rich AI prose.
+Criterion 2 passes for the same reason in reverse: the AI mean is 0.618, but that
+is entirely the 0.640 cap, so the 0.60 bar is cleared by the cap, not by the
+signals separating.
+
+**Pattern.** Four of these five mechanisms trace to signal two being either
+blind (non-Latin script, typos, short text, injected headers) or miscalibrated
+(anchors for ttr and punctuation), and to the combining rule trusting it: the
+0.5 "don't know" in particular is read as a vote. The route crashes (2) are a
+separate, simpler problem.
 
 ---
 
