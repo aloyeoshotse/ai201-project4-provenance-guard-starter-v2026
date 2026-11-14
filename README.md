@@ -672,22 +672,71 @@ separate, simpler problem.
 
 ## The Improvement
 
-**What I changed:**
+**What I changed:** One character in one line, in `scoring.py::combine_signals`.
+The guard that stops one signal from accusing a writer was
+`if min(model_score, style_score) < AI_REQUIRES_BOTH_AT` and is now
+`<= AI_REQUIRES_BOTH_AT` (the bar is still 0.5 in `config.py`). A signal at
+exactly 0.5 now counts as "not leaning AI", so it can no longer help a score
+reach the AI label. Nothing else changed: no thresholds, weights, or signals.
 
-**Which diagnosis pointed at it:**
+**Which diagnosis pointed at it:** Diagnosis 1. `style_signal` returns exactly
+0.5 for text it cannot see (emoji, Arabic, a single long word, anything under
+five words). The old `<` treated that 0.5 as agreement, so the model signal
+alone could reach 0.6 × 0.9976 + 0.4 × 0.5 = 0.7986 and label a person writing
+in Arabic as possible AI. I chose this over the other diagnoses because it was
+the worst outcome in my run, it was a plain bug against my own stated rule
+("one signal alone can never accuse anyone"), and it had a one-line fix that
+leaves every other attack's result checkable as unchanged.
 
 ### Attack Run — After
 
-<!-- Same format. `run_attacks.py --label after` -->
+`python run_attacks.py --set <attack_set> --label after`, same 56 attacks, same
+service and limits, same verdict rules as before
+(`results/attack_run_2026-11-14_1800_after.md`). The full eval after the change is
+`results/run_2026-11-14_1800_after.md`.
 
+Every row was compared with the before run. **Three rows changed and 53 did not**
+(status, guess and score all identical):
 
+| ID | Before | After | Verdict before → after |
+|---|---|---|---|
+| MF05 (a long run of "a") | 200, ai, 0.799 | 200, unsure, 0.640 | BROKE → HELD |
+| MF06 (emoji only) | 200, ai, 0.798 | 200, unsure, 0.640 | BROKE → HELD |
+| MF07 (Arabic text) | 200, ai, 0.744 | 200, unsure, 0.640 | BROKE → HELD |
 
-**Did it help, and how do I know:**
+Result: **9 broke, 47 held** (was 12 and 44). The nine still broken are EV01,
+EV05, EV08, FP02, FP05, PI01, PI02, MF02 and RQ07.
 
-<!-- Widening the unsure band usually fixes one problem and creates another.
-     Reporting that trade honestly is worth full credit. -->
+Log entry for MF07 after the change (the model signal is unchanged and the
+style signal still says "unknown"; only the rule's reaction differs):
 
+```json
+{"timestamp": "2026-11-14T23:00:30+00:00", "content_id": "69c78d63-c88a-46c3-9b50-68d2a77e20f1", "creator_id": "attacker_MF07", "guess": "unsure", "model_score": 0.9064, "style_score": 0.5, "combined_score": 0.64, "label": "We can't tell whether this was written by a person or with the help of AI. ...", "status": "decided"}
+```
 
+**Run log after** (`python run_eval.py --label after`, three trials):
+
+| Criterion | Before | After |
+|---|---|---|
+| 1. False positives | met (1/10 AI) | met (1/10 AI) |
+| 2. Score spread | met (gap 0.336) | met (gap 0.336) |
+| 3. Label coverage | missed | missed |
+| 4. Appeal path | met | met |
+| 5. Bad input | met | met |
+
+**Did it help, and how do I know:** It fixed what it was aimed at and nothing
+else. The three rows that were accused on a "don't know" are now "unsure", and the
+diff of all 56 rows shows no other row moved, so the change did not disturb
+anything that was working. The trade is small and I can name it: a text that
+really does have exactly 0.5 on the style signal can no longer be labelled AI,
+which costs a little recall; and it is a real change only for inputs the style
+signal cannot see. What it did **not** do matters more: it left every
+false-positive (FP02, FP05) and every evasion (EV01, EV05, EV08) exactly as they
+were, and criterion 3 is still missed, because the "AI" label is still not
+reachable by any text I tried. Those need the style anchors or signal one to
+change, which is a bigger and riskier edit than one character. The MF05 to MF07
+inputs also still get a verdict ("unsure") instead of a refusal; saying "we
+can't score this" would be more honest, and I did not build it.
 
 ---
 

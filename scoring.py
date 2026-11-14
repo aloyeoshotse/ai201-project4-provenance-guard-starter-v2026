@@ -57,9 +57,11 @@ def combine_signals(model_score: float, style_score: float) -> float:
         + config.WEIGHT_STYLE_SIGNAL * style_score
     )
     # A wrong accusation costs more than a missed detection, so the AI label
-    # needs both signals to lean AI. If either is below the bar, hold the score
-    # just under the AI threshold: it can read "unsure" but never "AI".
-    if min(model_score, style_score) < config.AI_REQUIRES_BOTH_AT:
+    # needs both signals to lean AI. If either is at or below the bar, hold the
+    # score just under the AI threshold: it can read "unsure" but never "AI".
+    # "At or below", not "below": a style signal that returns exactly 0.5 is
+    # saying "I can't see any shape", and that must not count as a vote for AI.
+    if min(model_score, style_score) <= config.AI_REQUIRES_BOTH_AT:
         combined = min(combined, config.AI_THRESHOLD - 0.01)
     return round(combined, 4)
 
