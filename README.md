@@ -511,18 +511,68 @@ same harm for an English writer.
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |
+| 1. False positives | at most 1 of 10 labelled AI, each trial; 4 are plain writing | 1/10 AI | 1/10 AI | 1/10 AI | **Met**, with no margin |
+| 2. Score spread | gap >= 0.30, AI mean > 0.60, human mean < 0.40 | 0.618 / 0.282 (gap 0.336) | same | same | **Met**, AI mean is 0.018 over the bar |
+| 3. Label coverage | all 3 labels appear, >= 6 of 9 as intended | human, unsure only; 6/9 | same | same | **Missed**: "AI" never appears |
+| 4. Appeal path | 10/10 appeals 200, `under_review`, recorded; unknown id 404, nothing recorded | 11/11 ok | 11/11 ok | 11/11 ok | **Met** |
+| 5. Bad input | 6 bad requests all 4xx, no 500, no decision logged, `/health` up | 6/6 ok | 6/6 ok | 6/6 ok | **Met** |
 
-**Real output from one trial**, pasted as text, naming the file and function
-that produced it:
+Produced by `python run_eval.py --label before` (`results/run_2026-11-14_1211_before.md`).
+Scores were identical across the three trials on this machine, so the repeats
+showed no model noise here; they would matter on other hardware.
+
+Things to know about this run:
+- **The "human" texts are not all mine.** Criterion 1 asks for writing I wrote or
+  collected from real people. The ten pieces and the human half of criterion 2
+  were drafted as stand-ins and sit in `scenarios.py`. The result is only as good
+  as that set, so I should swap in my own pieces before treating a pass as
+  evidence. The AI texts are AI-written, which is what they need to be.
+- **I extended `run_eval.py`.** It could not test criterion 4 (it needs a submission,
+  then an appeal, then a read of the log), so I added an appeal scenario to it,
+  and a `judge()` that applies each target from `criteria.md` and fills the table
+  above. I did not change any target.
+- **A first attempt was discarded.** An earlier run crashed in my own checker, and
+  the rerun straight after it hit the per-minute limit on the same eval
+  creator_ids (a 429 in trial 1 of criterion 1). I waited a minute and reran
+  cleanly; this table is that run.
+
+**Real output from one trial**, from `run_eval.py::main` (trial 1 of "label
+coverage": the three inputs I intended to be AI-labelled), fields as returned by
+`app.py::submit`:
 
 ```json
-
+[
+  {
+    "status": 200,
+    "guess": "unsure",
+    "confidence": 0.64,
+    "model_score": 0.8578,
+    "style_score": 0.3932,
+    "sent": "Artificial intelligence has transformed the way organizations operate "
+  },
+  {
+    "status": 200,
+    "guess": "unsure",
+    "confidence": 0.64,
+    "model_score": 0.8418,
+    "style_score": 0.4616,
+    "sent": "Effective time management is a crucial skill for success in both perso"
+  },
+  {
+    "status": 200,
+    "guess": "unsure",
+    "confidence": 0.64,
+    "model_score": 0.9258,
+    "style_score": 0.3825,
+    "sent": "Climate change represents one of the most pressing challenges of our t"
+  }
+]
 ```
+
+All three are the clearly-AI paragraphs, and all three came back "unsure" at
+0.640, the cap in `scoring.combine_signals`. The model signal read them as AI
+(0.84 to 0.93) but the style signal stayed below 0.5, so the rule held the score
+just under the AI threshold.
 
 **Diagnoses**
 

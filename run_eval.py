@@ -113,6 +113,12 @@ def main():
         trials = []
         for trial in range(1, args.trials + 1):
             results = []
+            if scenario.get("appeal"):
+                results = run_appeal_trial(requests, args, scenario)
+                trials.append(results)
+                print(f"  trial {trial}: "
+                      f"{', '.join(r.get('guess') or '—' for r in results)}")
+                continue
             for i, body in enumerate(bodies_for(scenario), 1):
                 preview = describe(body)
                 try:
@@ -121,6 +127,7 @@ def main():
                     payload = response.json() if response.content else {}
                     results.append({
                         "status": response.status_code,
+                        "content_id": payload.get("content_id"),
                         "guess": payload.get("guess"),
                         "confidence": payload.get("confidence"),
                         "model_score": payload.get("model_score"),
@@ -138,10 +145,131 @@ def main():
 
         rows.append({"scenario": scenario, "trials": trials})
 
-    write_report(rows, args)
+    verdicts = judge(rows, args)
+    for number, v in sorted(verdicts.items()):
+        marks = ["PASS" if ok else "FAIL" for ok, _ in v["trials"]]
+        print(f"criterion {number}: {' '.join(marks)}")
+    write_report(rows, args, verdicts)
 
 
-def write_report(rows, args):
+def run_appeal_trial(requests, args, scenario):
+    """
+    Criterion 4. Submit each text, appeal it, then read the log back to check
+    the appeal really was recorded and the status really moved. Finishes with
+    an appeal on an id that does not exist, which must 404 and leave no entry.
+    Each result's `guess` is "ok" or "FAIL" so it prints like the others.
+    """
+    results = []
+    for i, body in enumerate(bodies_for(scenario), 1):
+        sent = describe(body)
+        sub = requests.post(f"{args.url}/submit", json=body, timeout=args.timeout)
+        cid = (sub.json() if sub.content else {}).get("content_id")
+        if sub.status_code != 200 or not cid:
+            results.append({"status": sub.status_code, "guess": "FAIL",
+                            "detail": "submission failed", "sent": sent})
+            continue
+        reasoning = f"I wrote this myself (appeal test {i})."
+        ap = requests.post(f"{args.url}/appeal", timeout=args.timeout,
+                           json={"content_id": cid, "reasoning": reasoning})
+        entries = [e for e in requests.get(f"{args.url}/log", timeout=args.timeout)
+                   .json()["entries"] if e.get("content_id") == cid]
+        recorded = any(e.get("event") == "appeal" and e.get("reasoning") == reasoning
+                       for e in entries)
+        moved = bool(entries) and entries[-1].get("status") == "under_review"
+        ok = ap.status_code == 200 and recorded and moved
+        results.append({"status": ap.status_code, "guess": "ok" if ok else "FAIL",
+                        "content_id": cid, "appeal_recorded": recorded,
+                        "status_under_review": moved, "sent": sent})
+
+    ghost = "00000000-0000-0000-0000-000000000000"
+    ap = requests.post(f"{args.url}/appeal", timeout=args.timeout,
+                       json={"content_id": ghost, "reasoning": "no such item"})
+    leaked = any(e.get("content_id") == ghost for e in
+                 requests.get(f"{args.url}/log", timeout=args.timeout).json()["entries"])
+    ok = ap.status_code == 404 and not leaked
+    results.append({"status": ap.status_code, "guess": "ok" if ok else "FAIL",
+                    "unknown_id_recorded": leaked, "sent": "(unknown content_id)"})
+    return results
+
+
+def judge(rows, args):
+    """
+    Apply each criterion's target (see criteria.md) to each trial.
+
+    Returns {criterion: {"target": str, "trials": [(passed, note), ...]}}.
+    Criteria with no scenario in scenarios.py are left out.
+    """
+    import requests
+    by_name = {r["scenario"]["name"]: r for r in rows}
+    n = args.trials
+    out = {}
+
+    def mean(xs):
+        return sum(xs) / len(xs) if xs else float("nan")
+
+    if "own writing" in by_name:
+        trials = []
+        for res in by_name["own writing"]["trials"]:
+            ai = sum(1 for r in res if r.get("guess") == "ai")
+            bad = sum(1 for r in res if r.get("status") != 200)
+            trials.append((ai <= 1 and bad == 0, f"{ai}/{len(res)} labelled AI"))
+        out[1] = {"target": "at most 1 of 10 own pieces labelled AI, every trial",
+                  "trials": trials}
+
+    if "spread ai" in by_name and "spread human" in by_name:
+        trials = []
+        for t in range(n):
+            a = mean([r["confidence"] for r in by_name["spread ai"]["trials"][t]
+                      if r.get("confidence") is not None])
+            h = mean([r["confidence"] for r in by_name["spread human"]["trials"][t]
+                      if r.get("confidence") is not None])
+            ok = a - h >= 0.30 and a > 0.60 and h < 0.40
+            trials.append((ok, f"AI {a:.3f}, human {h:.3f}, gap {a - h:.3f}"))
+        out[2] = {"target": "gap >= 0.30, AI mean > 0.60, human mean < 0.40",
+                  "trials": trials}
+
+    if "label coverage" in by_name:
+        sc = by_name["label coverage"]["scenario"]
+        trials = []
+        for res in by_name["label coverage"]["trials"]:
+            guesses = [r.get("guess") for r in res]
+            hit = sum(1 for g, w in zip(guesses, sc["intended"]) if g == w)
+            ok = {"human", "unsure", "ai"} <= set(guesses) and hit >= 6
+            trials.append((ok, f"labels {sorted(set(g for g in guesses if g))}, {hit}/9 as intended"))
+        out[3] = {"target": "all 3 labels appear, >= 6 of 9 land as intended",
+                  "trials": trials}
+
+    if "appeal path" in by_name:
+        trials = []
+        for res in by_name["appeal path"]["trials"]:
+            good = sum(1 for r in res if r.get("guess") == "ok")
+            trials.append((good == len(res), f"{good}/{len(res)} checks ok (10 appeals + 1 unknown id)"))
+        out[4] = {"target": "10/10 appeals 200, under_review, recorded; unknown id 404, nothing recorded",
+                  "trials": trials}
+
+    if "bad input" in by_name:
+        sc = by_name["bad input"]["scenario"]
+        creators = {b.get("creator_id") for b in sc["bodies"]}
+        trials = []
+        for res in by_name["bad input"]["trials"]:
+            refused = sum(1 for r in res if r.get("status") and 400 <= r["status"] < 500)
+            crashed = sum(1 for r in res if r.get("status") is None or r["status"] >= 500)
+            log = requests.get(f"{args.url}/log", timeout=args.timeout).json()["entries"]
+            decisions = sum(1 for e in log if isinstance(e.get("creator_id"), str) and e.get("creator_id") in creators
+                            and e.get("guess") is not None)
+            try:
+                alive = requests.get(f"{args.url}/health", timeout=5).status_code == 200
+            except Exception:  # noqa: BLE001
+                alive = False
+            ok = refused == len(res) and not crashed and decisions == 0 and alive
+            trials.append((ok, f"{refused}/{len(res)} 4xx, {crashed} crashes, "
+                               f"{decisions} decisions logged, health {'ok' if alive else 'DOWN'}"))
+        out[5] = {"target": "all bad requests 4xx, no 500, no decision logged, /health alive",
+                  "trials": trials}
+    return out
+
+
+def write_report(rows, args, verdicts):
     config.RESULTS_DIR.mkdir(exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y-%m-%d_%H%M")
     label = f"_{args.label}" if args.label else ""
@@ -165,11 +293,10 @@ def write_report(rows, args):
         f"|---|---|{divider}|---|",
     ]
 
-    for row in rows:
-        scenario = row["scenario"]
-        number = scenario.get("criterion")
-        name = f"{number}. {scenario['name']}" if number else scenario["name"]
-        lines.append(f"| {name} |  | {' | '.join([' '] * n)} |  |")
+    for number, v in sorted(verdicts.items()):
+        cells = " | ".join(f"{'PASS' if ok else 'FAIL'}: {note}" for ok, note in v["trials"])
+        verdict = "MET" if all(ok for ok, _ in v["trials"]) else "MISSED"
+        lines.append(f"| {number} | {v['target']} | {cells} | {verdict} |")
 
     lines += ["", "---", "", "## What actually came back", "",
               "Real output. Paste the relevant parts into your README — the rubric",
