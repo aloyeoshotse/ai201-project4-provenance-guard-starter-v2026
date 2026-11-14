@@ -102,11 +102,19 @@ def log_rejection(creator_id: str, reason: str, **extra) -> dict:
     thousand requests that got a 429 and left no trace look exactly like a
     quiet afternoon.
     """
+    # All nine required fields are present (empty where no decision exists), so
+    # rejected entries have the same shape as decisions.
     return _append({
         "timestamp": _now(),
+        "content_id": extra.pop("content_id", None),
         "creator_id": creator_id,
-        "event": "rejected",
+        "guess": None,
+        "model_score": None,
+        "style_score": None,
+        "combined_score": None,
+        "label": None,
         "status": "rejected",
+        "event": "rejected",
         "reason": reason,
         **extra,
     })

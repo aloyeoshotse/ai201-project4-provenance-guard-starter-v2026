@@ -97,8 +97,11 @@ AI_THRESHOLD = 0.65
 # an hour, and a script sending a thousand variations to map your thresholds.
 # Your README has to say why your numbers and not others.
 
-RATE_LIMITING_ENABLED = os.getenv("AI201_RATE_LIMITS", "0") == "1"
+RATE_LIMITING_ENABLED = os.getenv("AI201_RATE_LIMITS", "1") == "1"
 
+# Per creator_id (falls back to address). A real writer submits a few pieces an
+# hour; 10 a minute is generous for them, while the daily cap of 200 stops a
+# script from sweeping thresholds with thousands of variations.
 RATE_LIMIT_PER_MINUTE = 10
 RATE_LIMIT_PER_DAY = 200
 
@@ -106,6 +109,11 @@ RATE_LIMIT_PER_DAY = 200
 # and wrong for anything real — a restart forgets every count, and two copies
 # of the service wouldn't share limits.
 RATE_LIMIT_STORAGE = "memory://"
+
+
+# Longest text /submit accepts. Roughly 3,000 words: well past the 400-token
+# window the detector reads, and far short of a request built to exhaust memory.
+MAX_TEXT_CHARS = 20000
 
 
 # ─── Paths ───────────────────────────────────────────────────────────────────

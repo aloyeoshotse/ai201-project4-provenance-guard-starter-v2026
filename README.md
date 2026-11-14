@@ -348,25 +348,39 @@ $ curl "http://127.0.0.1:5000/log?limit=2"
 
 ## Rate Limiting
 
-**My limits:** ___ per minute, ___ per day
+**My limits:** 10 per minute, 200 per day (`config.py`: `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_PER_DAY`), applied to `POST /submit` by the `@limiter.limit` decorator in `app.py`.
 
-**Why those numbers and not others:**
-<!-- Think about two people: a real writer submitting their own work a few
-     times an hour, and a script sending a thousand variations to map your
-     thresholds. Your numbers have to be liveable for the first and hostile to
-     the second. -->
+**Why those numbers and not others:** A real writer submits their own work a
+few times an hour, so 10 a minute is far more than they will ever use and they
+should never see a 429. A script mapping my thresholds needs hundreds of
+variations; the daily cap of 200 makes that take days per address instead of
+minutes, and the per-minute cap stops a burst. I did not go lower on the minute
+limit because someone re-checking edits of one piece in a row would hit it, and
+a wrongly-accused writer retrying should not also be locked out.
 
-**What a caller counts as:** <!-- per address, or per creator_id? They fail
-differently — one script can look like a thousand callers, and one household
-can look like one. -->
+**What a caller counts as:** The `creator_id` when the request has one, and the
+caller's IP address when it does not (`rate_limit_key` in `app.py`). The
+`creator_id` is what the attack tooling varies, but it is also self-reported, so
+a script can rotate it freely and look like many callers; the address fallback
+only covers requests that omit it. A shared household or school would look like
+one caller under the address fallback. Per-address limiting on top would close the
+rotation gap and is not done here.
 
 **The run of status codes when I pushed past it:**
 
 <!-- python run_attacks.py --flood 15 -->
 
 ```
-
+15 submissions as 'flood_tester' against http://127.0.0.1:5000
+200 200 200 200 200 200 200 200 200 200 200 429 429 429 429
 ```
+
+The first eleven got through rather than ten because the limiter's window had
+started just before the first request, which was slow while the model loaded.
+Rejected requests are logged (`event: "rejected"`, `reason: "rate_limited"`), and
+so are requests refused for bad input (`invalid_text`, `text_too_long`, the
+latter above 20,000 characters, returned as 413). Every log entry now carries
+all nine fields; rejections hold `null` for the decision fields.
 
 ---
 
